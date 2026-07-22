@@ -1,0 +1,12 @@
+{
+  "name": "skill-etf-flow-radar",
+  "description": "ETF 净申赎资金流雷达：每日盘后扫描主流权益 ETF，输出 S1（净申赎异动）/S4（折溢价背离）/S7（连续同向）三类异动榜（CSV + Markdown）。",
+  "tags": ["quant", "etf", "flow", "radar"],
+  "version": "0.1.0",
+  "author": "forest808",
+  "scripts": {
+    "radar": "scripts/radar.py"
+  },
+  "data_source": "panda_data",
+  "asset_type": "etf"
+}
