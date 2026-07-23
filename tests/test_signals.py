@@ -18,9 +18,11 @@ def _build_flow_df(symbol: str, values_by_date: list[tuple[str, float]]) -> pd.D
 # ---------- S1 ----------
 
 def test_s1_hit_high_z():
-    # 20 baseline days at 0, T=1e8 → z is very large
+    # 20 baseline days of small noise (sigma ≈ 30), T = 1e8 → z massively above threshold
     dates = [f"2026070{i:02d}" for i in range(1, 22)]  # 21 fake trading days
-    values = [(d, 0.0) for d in dates[:-1]] + [(dates[-1], 1e8)]
+    baseline_values = [10.0, -20.0, 30.0, -10.0, 25.0, -15.0, 5.0, 20.0, -30.0, 15.0,
+                       -25.0, 10.0, 35.0, -5.0, 20.0, -10.0, 25.0, -15.0, 5.0, -20.0]
+    values = list(zip(dates[:-1], baseline_values)) + [(dates[-1], 1e8)]
     df = _build_flow_df("510050.SH", values)
 
     hits = signals.s1_net_flow_z(df, ["510050.SH"], date=dates[-1], z_threshold=2.0, lookback=20)
@@ -37,6 +39,16 @@ def test_s1_hit_high_z():
 def test_s1_low_sigma_skip():
     dates = [f"2026070{i:02d}" for i in range(1, 22)]
     values = [(d, 0.0) for d in dates]  # T-day also zero → sigma = 0
+    df = _build_flow_df("510050.SH", values)
+
+    hits = signals.s1_net_flow_z(df, ["510050.SH"], date=dates[-1], z_threshold=2.0, lookback=20)
+    assert hits.empty
+
+
+def test_s1_zero_sigma_baseline_skip():
+    """Baseline with no variance (sigma < epsilon) must be skipped, even if T is extreme."""
+    dates = [f"2026070{i:02d}" for i in range(1, 22)]
+    values = [(d, 0.0) for d in dates[:-1]] + [(dates[-1], 1e8)]
     df = _build_flow_df("510050.SH", values)
 
     hits = signals.s1_net_flow_z(df, ["510050.SH"], date=dates[-1], z_threshold=2.0, lookback=20)

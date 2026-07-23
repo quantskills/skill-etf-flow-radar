@@ -107,13 +107,10 @@ def s1_net_flow_z(
             continue  # insufficient history → skip S1 (design §6)
         mu = history["net_redemption"].mean()
         sigma = history["net_redemption"].std(ddof=1)
-        if sigma is None or pd.isna(sigma):
+        if sigma is None or pd.isna(sigma) or sigma < _SIGMA_EPSILON:
             continue
         t_row = g.iloc[-1]
-        # Floor sigma at epsilon to avoid division blow-ups on ~constant baselines.
-        # (For real net_redemption denominated in shares/yuan, epsilon=1.0 is negligible.)
-        sigma_eff = max(float(sigma), _SIGMA_EPSILON)
-        z = (t_row["net_redemption"] - mu) / sigma_eff
+        z = (t_row["net_redemption"] - mu) / sigma
         if abs(z) < z_threshold:
             continue
         rows.append(
