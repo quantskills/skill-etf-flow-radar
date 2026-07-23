@@ -81,3 +81,63 @@ def test_s1_output_columns():
 
     hits = signals.s1_net_flow_z(df, ["510050.SH"], date=dates[-1])
     assert list(hits.columns) == signals.SIGNAL_COLUMNS
+
+
+# ---------- S4 ----------
+
+def _daily_row(symbol: str, date: str, discount_rate: float) -> dict:
+    return {"symbol": symbol, "date": date, "discount_rate": discount_rate}
+
+
+def test_s4_premium_buy():
+    # 溢价 (dr<0) + 净申购 (nr>0) → premium_buy
+    flow = pd.DataFrame([_flow_row("510050.SH", "20260722", 3e7)])
+    daily = pd.DataFrame([_daily_row("510050.SH", "20260722", -0.005)])
+    hits = signals.s4_discount_diverge(flow, daily, ["510050.SH"], date="20260722", discount_threshold=0.003)
+    assert len(hits) == 1
+    row = hits.iloc[0]
+    assert row["signal_type"] == "S4"
+    assert row["signal_value"] == pytest.approx(0.005)
+    assert row["abs_signal_value"] == pytest.approx(0.005)
+    detail = json.loads(row["detail_json"])
+    assert detail["pattern"] == "premium_buy"
+    assert row["discount_rate_T"] == pytest.approx(-0.005)
+
+
+def test_s4_discount_sell():
+    # 贴水 (dr>0) + 净赎回 (nr<0) → discount_sell
+    flow = pd.DataFrame([_flow_row("510050.SH", "20260722", -2e7)])
+    daily = pd.DataFrame([_daily_row("510050.SH", "20260722", 0.004)])
+    hits = signals.s4_discount_diverge(flow, daily, ["510050.SH"], "20260722")
+    assert len(hits) == 1
+    detail = json.loads(hits.iloc[0]["detail_json"])
+    assert detail["pattern"] == "discount_sell"
+
+
+def test_s4_same_direction_no_hit():
+    # 溢价 (dr<0) + 净赎回 (nr<0) → 同向，不命中
+    flow = pd.DataFrame([_flow_row("510050.SH", "20260722", -3e7)])
+    daily = pd.DataFrame([_daily_row("510050.SH", "20260722", -0.005)])
+    hits = signals.s4_discount_diverge(flow, daily, ["510050.SH"], "20260722")
+    assert hits.empty
+
+
+def test_s4_below_threshold_no_hit():
+    flow = pd.DataFrame([_flow_row("510050.SH", "20260722", 3e7)])
+    daily = pd.DataFrame([_daily_row("510050.SH", "20260722", -0.002)])
+    hits = signals.s4_discount_diverge(flow, daily, ["510050.SH"], "20260722", discount_threshold=0.003)
+    assert hits.empty
+
+
+def test_s4_missing_discount_row_skip():
+    flow = pd.DataFrame([_flow_row("510050.SH", "20260722", 3e7)])
+    daily = pd.DataFrame([_daily_row("OTHER.SZ", "20260722", -0.005)])  # no row for 510050 on T
+    hits = signals.s4_discount_diverge(flow, daily, ["510050.SH"], "20260722")
+    assert hits.empty
+
+
+def test_s4_output_columns():
+    flow = pd.DataFrame([_flow_row("510050.SH", "20260722", 3e7)])
+    daily = pd.DataFrame([_daily_row("510050.SH", "20260722", -0.005)])
+    hits = signals.s4_discount_diverge(flow, daily, ["510050.SH"], "20260722")
+    assert list(hits.columns) == signals.SIGNAL_COLUMNS
