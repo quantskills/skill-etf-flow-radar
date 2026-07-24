@@ -131,7 +131,11 @@ def _main() -> int:
     p.add_argument("--self-check", action="store_true", required=True)
     p.add_argument("--date", required=True, help="YYYYMMDD")
     args = p.parse_args()
-    return self_check(args.date)
+    try:
+        return self_check(args.date)
+    except RuntimeError as e:
+        print(f"[error] {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

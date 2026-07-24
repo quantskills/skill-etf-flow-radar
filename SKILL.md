@@ -26,7 +26,7 @@ tags: [quant, etf, flow, radar]
 - `net_redemption > 0` → 净申购；`< 0` → 净赎回
 - `discount_rate > 0` → 贴水（价格低于净值）；`< 0` → 溢价
 
-首次实测须校准；如反向，只需改 `signals.py` 中一处 `SIGN_FLIP_*` 常量。
+首次实测须校准；如反向，修改 `scripts/signals/{s1,s4,s7}.py` 中对应的方向判断（S1 的 direction / S4 的 pattern / S7 的 direction）。
 
 ## ETF 池
 
@@ -113,10 +113,10 @@ pytest tests/ -v
 - **单元测试全通过**：`pytest tests/` 无失败
 - **字段自检通过**：`python -m scripts.data --self-check --date <近期日>` 返回 0
 - **端到端跑通**：至少一个真实日期能产出 CSV + MD，命中数**可为 0**（不为了凑数刻意放宽阈值）
-- **文档一致**：本文件的信号公式与 `scripts/signals.py` 一致
+- **文档一致**：本文件的信号公式与 `scripts/signals/` 包中 `s1.py` / `s4.py` / `s7.py` 一致
 
 ## 已知局限
-- `net_redemption` / `discount_rate` 正负号方向依赖首次实测校准；若反向，改一处 `SIGN_FLIP_*` 常量。
+- `net_redemption` / `discount_rate` 正负号方向依赖首次实测校准；若反向，修改 `scripts/signals/{s1,s4,s7}.py` 中对应方向判断（v0.1.0 未抽出 `SIGN_FLIP` 常量，需要动手编辑三处比较；v0.2 计划补上）。
 - 不含"触限打满"作为独立信号，仅作参考列 `limit_hit_flag`。
 - 不接入 ETF 基础信息接口，`name` 列留空。
 - 不做批量日期回补；如需回补，外层 shell 循环即可。
