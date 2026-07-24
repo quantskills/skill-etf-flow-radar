@@ -20,6 +20,12 @@ from pathlib import Path
 
 import pandas as pd
 
+# Allow both `python scripts/radar.py` and `python -m scripts.radar` invocations.
+# When the file is run directly, Python prepends `scripts/` (not the repo root) to
+# sys.path, so `from scripts import ...` below would fail. Insert the repo root
+# ourselves before the package imports.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from scripts import data as data_mod
 from scripts import report, signals, universe
 
