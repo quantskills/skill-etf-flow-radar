@@ -131,10 +131,26 @@ def _main() -> int:
     p.add_argument("--self-check", action="store_true", required=True)
     p.add_argument("--date", required=True, help="YYYYMMDD")
     args = p.parse_args()
+
+    # Lazily resolve panda_data.exceptions.ServiceError. If panda_data isn't installed,
+    # init_panda_data() will fail earlier with RuntimeError (missing env vars) or ImportError;
+    # either way we won't need to catch ServiceError, so a placeholder tuple is safe.
+    try:
+        from panda_data.exceptions import ServiceError as _ServiceError
+        service_error_cls: tuple = (_ServiceError,)
+    except ImportError:
+        service_error_cls = ()
+
     try:
         return self_check(args.date)
     except RuntimeError as e:
+        # Missing PANDA_DATA_USERNAME / PANDA_DATA_PASSWORD, etc.
         print(f"[error] {e}", file=sys.stderr)
+        return 1
+    except service_error_cls as e:  # type: ignore[misc]  # empty tuple = catch nothing
+        # Auth / network failures from panda_data (HTTP 4xx/5xx, login rejected, …).
+        # Print one line; full traceback would drown the actionable message.
+        print(f"[error] panda_data service error: {e}", file=sys.stderr)
         return 1
 
 
