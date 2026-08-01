@@ -1,6 +1,6 @@
 ---
 name: skill-etf-flow-radar
-description: 每日盘后 ETF 资金流雷达 —— 用户问「今天/最近 ETF 有什么异动」「ETF 资金流看下」「哪些 ETF 在被大量申购/赎回」「ETF 净申赎异动」类问题时触发。扫描主流权益 ETF，输出三类信号（净申赎异动 / 折溢价背离 / 连续同向），以「样式② 结构化播报」呈现给用户。
+description: 每日盘后 ETF 资金流雷达 —— 用户问「今天/最近 ETF 有什么异动」「ETF 资金流看下」「哪些 ETF 在被大量申购/赎回」「ETF 净申赎异动」类问题时触发。扫描主流权益 ETF，输出三类信号（净申赎异动 / 折溢价背离 / 连续多日大额同向），以「样式② 结构化播报」呈现给用户。
 tags: [quant, etf, flow, radar]
 ---
 
@@ -51,7 +51,7 @@ S1/S7 需要 20 交易日历史；20 交易日 ≈ 28 自然日；取 40 自然�
 > 📌 **命名说明**：本 skill 内部用 `S1` / `S4` / `S7` 作为信号代号（对应 `scripts/signals/s1.py` 等文件、CSV 里 `signal_type` 列的取值、以及"设计文档中信号编号"的历史沿革）。这些编号**只出现在代码和 CSV 输出中**，**绝对不要在给用户的呈现文本里出现**。呈现时必须使用下方三条中文名称：
 > - S1 → 「净申赎异动」
 > - S4 → 「折溢价背离」
-> - S7 → 「连续同向」
+> - S7 → 「连续多日大额同向」（近 3 日申赎方向一致且累计量放大 ≥ 2 倍）
 
 ### 信号一 · 净申赎异动（内部代号 S1，Z-score）
 对每只池内 ETF，用 T-1 至 T-L（L=20，不含 T）的 `net_redemption` 计算均值/标准差，得到 T 日 z 值。**|z| ≥ z_threshold (默认 2.0)** 命中。`sigma < 1` 时跳过该 ETF 的判断。
@@ -61,8 +61,10 @@ S1/S7 需要 20 交易日历史；20 交易日 ≈ 28 自然日；取 40 自然�
 - 溢价 + 净申购 → `premium_buy`
 - 贴水 + 净赎回 → `discount_sell`
 
-### 信号三 · 连续同向（内部代号 S7）
-最近 `consec_days` 天（默认 3）`net_redemption` 全同号，且累计绝对值 ≥ `ratio_threshold × mu_abs`（默认 2.0；`mu_abs` = 前 20 交易日 `|net_redemption|` 均值）。基线窗口不与 K 日窗口重叠。
+### 信号三 · 连续多日大额同向（内部代号 S7）
+**含义**：一只 ETF 连续多日（默认 3 日）净申赎方向一致（要么连续净申购，要么连续净赎回），并且这 3 日累计的绝对金额显著放大到历史 20 日均值的 2 倍以上。捕捉"资金已经不是一次性动作,而是持续多日在同一方向堆积"的趋势资金。
+
+**判定公式**：最近 `consec_days` 天（默认 3）`net_redemption` 全同号，且累计绝对值 ≥ `ratio_threshold × mu_abs`（默认 2.0；`mu_abs` = 前 20 交易日 `|net_redemption|` 均值）。基线窗口不与 K 日窗口重叠。
 
 ## 输入数据
 
@@ -94,7 +96,42 @@ S1/S7 需要 20 交易日历史；20 交易日 ≈ 28 自然日；取 40 自然�
 
 ## Agent 触发流程（本 skill 的正式用法）
 
-用户提问命中「何时触发」后，按以下四步执行，**不要跳步、不要问用户参数**：
+用户提问命中「何时触发」后，按以下五步执行，**不要跳步、不要问用户参数**：
+
+### Step 0 · 凭证预检（必须先做，未通过不进入 Step 1）
+
+本 skill 依赖 `panda_data` 服务，需要两个环境变量：
+
+- `PANDA_DATA_USERNAME`
+- `PANDA_DATA_PASSWORD`
+
+**Agent 执行前先探测这两个变量**（Bash 是非交互 shell，`~/.zshrc` 里 export 的变量不会自动进来，须显式 source）：
+
+```bash
+set -a && source ~/.zshrc >/dev/null 2>&1 && set +a && \
+if [ -z "$PANDA_DATA_USERNAME" ] || [ -z "$PANDA_DATA_PASSWORD" ]; then \
+    echo "MISSING_CREDENTIALS"; \
+else \
+    echo "OK: user=$PANDA_DATA_USERNAME"; \
+fi
+```
+
+**如果输出 `MISSING_CREDENTIALS`**：**立刻停下**，不要继续 Step 1/2/3/4。用下面这段话回复用户（照抄，把 `〈说明〉` 位置替换成实际情况）：
+
+> 跑这个 skill 需要先配置 panda_data 的账号凭证，你还没设置。请按下面两步操作：
+>
+> 1. 打开 `~/.zshrc`（或 `~/.bashrc`，看你用哪个 shell），在文件末尾加两行：
+>    ```bash
+>    export PANDA_DATA_USERNAME="你的 panda_data 用户名"
+>    export PANDA_DATA_PASSWORD="你的 panda_data 密码"
+>    ```
+> 2. 保存后，在终端执行 `source ~/.zshrc`（bash 用户执行 `source ~/.bashrc`）让变量生效。
+>
+> 配置好之后，再问我一次"今天 ETF 有什么异动"，我就能跑了。
+>
+> 如果你还没有 panda_data 账号，需要先在 panda_data 官网注册。
+
+**如果输出 `OK: user=...`**：凭证具备，进入 Step 1。
 
 ### Step 1 · 决定扫描日期
 
@@ -111,7 +148,7 @@ set -a && source ~/.zshrc >/dev/null 2>&1 && set +a && \
 ```
 
 - 环境是 conda `pandaai`（Python 3.10，`panda_data` 已装）
-- 凭证 `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` 在 `~/.zshrc`（非交互 shell 须显式 source）
+- 凭证已在 Step 0 预检过；这里 `source ~/.zshrc` 是把变量注入到非交互 Bash
 - **不用再传 `--fetch_days`**：v0.2 起 `load_flow` / `load_daily` 已内部按月分段，跨月不再返回空
 - exit code：0 OK / 1 panda_data 异常 / 2 该日无 flow 数据 / 3 池空 / 4 字段自检失败
 
@@ -143,8 +180,8 @@ set -a && source ~/.zshrc >/dev/null 2>&1 && set +a && \
 - <symbol>：z-X.XX
 - <symbol>：z-X.XX
 
-▎折溢价背离：X 条 <如 0 且日期≥20260611，须加数据说明句>
-▎连续同向 3 日：X 条 <若有，取 top3 附 ratio 与方向>
+▎折溢价背离：X 条 <若有，取 top3 附 |dr| 与模式>
+▎连续多日大额同向：X 条 <若有，取 top3 附 ratio 与方向；此信号表示"连续 3 日申赎同方向且累计量放大到历史 2 倍以上"，是持续性趋势资金>
 ```
 
 **主线判断话术表**（判断依据是「净申赎异动」信号的正负分布）：
@@ -157,9 +194,8 @@ set -a && source ~/.zshrc >/dev/null 2>&1 && set +a && \
 | 净申赎异动命中 ≤ 2 条 | 「今日资金流平淡，无显著异动」 |
 | 池空（exit 3） | 「今日无满足流动性门槛的 ETF 数据，可能是节假日/停市」 |
 
-**数据侧特殊情况**（Agent 必须显式说明，避免误报市场现象）：
+**数据侧特殊情况**（Agent 必须显式说明）：
 
-- **`discount_rate` 从 2026-06-11 起 panda_data 返回全空** → 用 20260611 及之后的日期跑时，「折溢价背离」恒为 0。呈现时须写："折溢价背离：0 条（panda_data 自 2026-06-11 起 `discount_rate` 全空，非市场信号缺失）"
 - **exit 1（panda_data 5xx）** → 不要重试超过一次，直接告诉用户"panda_data 服务暂不可用，稍后再试"
 - **exit 2（该日无 flow 数据）** → 提示用户"该日期无 ETF 一级申赎数据，可能是非交易日"
 
@@ -198,7 +234,6 @@ pytest tests/ -v
 
 ## 已知局限
 - `net_redemption` / `discount_rate` 正负号方向依赖首次实测校准；若反向，修改 `scripts/signals/{s1,s4,s7}.py` 中对应方向判断（v0.1.0 未抽出 `SIGN_FLIP` 常量，需要动手编辑三处比较；v0.2 计划补上）。
-- **`discount_rate` 自 2026-06-11 起 panda_data 返回全空**，「折溢价背离」信号对之后日期恒 0 命中；这不是本 skill 的 bug，是上游数据缺失，Agent 呈现时须显式说明。
 - 不含"触限打满"作为独立信号，仅作参考列 `limit_hit_flag`。
 - 不接入 ETF 基础信息接口，`name` 列留空。
 - 不做批量日期回补；如需回补，外层 shell 循环即可。
