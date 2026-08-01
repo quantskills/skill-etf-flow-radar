@@ -7,12 +7,25 @@ exit code 4 via self_check().
 panda_data is a private package imported lazily inside each function so that this module
 can be imported (and its EXPECTED_COLUMNS inspected) without panda_data installed —
 useful for unit-testing callers that mock the loaders.
+
+Cross-month behavior
+--------------------
+panda_data's `get_fund_daily` / `get_fund_etf_cr_net` return an empty DataFrame when
+[start_date, end_date] spans multiple natural months (observed on 20260501~20260610 for
+daily; same shape for flow). Root cause is server-side, not fixed in the client.
+
+To hide this from callers (the radar's 40-natural-day fetch window routinely straddles
+a month boundary), `load_flow` / `load_daily` split the request into month-sized chunks
+internally and concat the results. Single-month requests still make a single call
+(back-compat with existing tests that mock the loader once).
 """
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+from datetime import datetime, timedelta
+from typing import Callable
 
 import pandas as pd
 
@@ -55,28 +68,91 @@ def _assert_columns(df: pd.DataFrame, kind: str) -> None:
         )
 
 
+def _month_chunks(start_date: str, end_date: str) -> list[tuple[str, str]]:
+    """Split [start_date, end_date] into month-sized closed intervals (YYYYMMDD strings).
+
+    Same month → one chunk (single-call fast path, preserves back-compat with tests
+    that mock the loader exactly once). Multi-month → one chunk per month, each
+    clipped to [start_date, end_date].
+
+    Examples:
+        _month_chunks("20260610", "20260630") → [("20260610", "20260630")]
+        _month_chunks("20260501", "20260610")
+            → [("20260501","20260531"), ("20260601","20260610")]
+    """
+    s = datetime.strptime(start_date, "%Y%m%d")
+    e = datetime.strptime(end_date, "%Y%m%d")
+    if s > e:
+        return []
+    chunks: list[tuple[str, str]] = []
+    cur = s
+    while cur <= e:
+        # Last day of `cur`'s month
+        if cur.month == 12:
+            next_month_first = datetime(cur.year + 1, 1, 1)
+        else:
+            next_month_first = datetime(cur.year, cur.month + 1, 1)
+        month_end = next_month_first - timedelta(days=1)
+        chunk_end = min(month_end, e)
+        chunks.append((cur.strftime("%Y%m%d"), chunk_end.strftime("%Y%m%d")))
+        cur = chunk_end + timedelta(days=1)
+    return chunks
+
+
+def _load_chunked(
+    fetch_one: Callable[[str, str], "pd.DataFrame | None"],
+    start_date: str,
+    end_date: str,
+    kind: str,
+) -> pd.DataFrame:
+    """Call `fetch_one(s, e)` per month-chunk of [start_date, end_date], concat, dedupe.
+
+    Kept in one place so `load_flow` / `load_daily` share the cross-month workaround.
+    An empty return from any chunk is treated as "no data in that month" (not an error);
+    the final frame is the concat of whatever came back. Empty overall → empty frame
+    with the expected columns.
+    """
+    frames: list[pd.DataFrame] = []
+    for s, e in _month_chunks(start_date, end_date):
+        df = fetch_one(s, e)
+        if df is None or (hasattr(df, "empty") and df.empty):
+            continue
+        _assert_columns(df, kind)
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=sorted(EXPECTED_COLUMNS[kind]))
+    out = pd.concat(frames, ignore_index=True)
+    # Chunks are non-overlapping by construction; still dedupe on (symbol, date) as a
+    # cheap safety net in case a future panda_data change starts returning boundary
+    # rows in both adjacent chunks.
+    out = out.drop_duplicates(subset=["symbol", "date"], keep="first").reset_index(drop=True)
+    out["date"] = out["date"].astype(str)
+    out["symbol"] = out["symbol"].astype(str)
+    return out
+
+
 def load_flow(start_date: str, end_date: str) -> pd.DataFrame:
-    """get_fund_etf_cr_net over [start_date, end_date] (whole-market)."""
+    """get_fund_etf_cr_net over [start_date, end_date] (whole-market).
+
+    Cross-month windows are split by month internally (see module docstring).
+    """
     import panda_data
-    df = panda_data.get_fund_etf_cr_net(start_date=start_date, end_date=end_date)
-    if df is None or (hasattr(df, "empty") and df.empty):
-        return pd.DataFrame(columns=sorted(EXPECTED_COLUMNS["flow"]))
-    _assert_columns(df, "flow")
-    df["date"] = df["date"].astype(str)
-    df["symbol"] = df["symbol"].astype(str)
-    return df
+    return _load_chunked(
+        lambda s, e: panda_data.get_fund_etf_cr_net(start_date=s, end_date=e),
+        start_date, end_date, "flow",
+    )
 
 
 def load_daily(start_date: str, end_date: str) -> pd.DataFrame:
-    """get_fund_daily over [start_date, end_date] (whole-market)."""
+    """get_fund_daily over [start_date, end_date] (whole-market).
+
+    Cross-month windows are split by month internally (see module docstring).
+    """
     import panda_data
-    df = panda_data.get_fund_daily(start_date=start_date, end_date=end_date)
-    if df is None or (hasattr(df, "empty") and df.empty):
-        return pd.DataFrame(columns=sorted(EXPECTED_COLUMNS["daily"]))
-    _assert_columns(df, "daily")
-    df["date"] = df["date"].astype(str)
-    df["symbol"] = df["symbol"].astype(str)
-    return df
+    return _load_chunked(
+        lambda s, e: panda_data.get_fund_daily(start_date=s, end_date=e),
+        start_date, end_date, "daily",
+    )
 
 
 def load_limits(date: str) -> pd.DataFrame:

@@ -1,15 +1,21 @@
 ---
 name: skill-etf-flow-radar
-description: ETF 净申赎资金流雷达。每日盘后扫描主流权益 ETF，输出 S1（净申赎异动）/S4（折溢价背离）/S7（连续同向）三类异动榜（CSV + Markdown）。
+description: 每日盘后 ETF 资金流雷达 —— 用户问「今天/最近 ETF 有什么异动」「ETF 资金流看下」「哪些 ETF 在被大量申购/赎回」「ETF 净申赎异动」类问题时触发。扫描主流权益 ETF，输出 S1（净申赎异动）/S4（折溢价背离）/S7（连续同向）三类信号，以「样式② 结构化播报」呈现给用户。
 tags: [quant, etf, flow, radar]
 ---
 
 # ETF 净申赎资金流雷达
 
-## 适用场景
-- 每日盘后想快速看"哪些 ETF 今天有异常资金流入/流出"
-- 想快速识别"折溢价 + 一级申赎方向背离"的套利/恐慌信号
-- 想跟踪某只 ETF 是否处于"连续多日同向"的趋势中
+## 何时触发本 skill
+
+用户提问命中下列语义时，自动调用：
+
+- 「今天 ETF 有什么异动」「最近 ETF 资金流看下」
+- 「哪些 ETF 被大量申购/赎回」「ETF 净申赎异动」
+- 「跑一下 ETF 资金流雷达」「扫一下 ETF 资金流」
+- 「有没有 ETF 出现折溢价套利机会」（S4 语义）
+
+**不触发**：单只 ETF 的个股问答、非 ETF 的股票资金流、宏观资金面判断。
 
 ## 数据接口（panda_data）
 
@@ -81,28 +87,97 @@ S1/S7 需要 20 交易日历史；20 交易日 ≈ 28 自然日；取 40 自然�
 
 **`output/radar_YYYYMMDD.md`**：Top 10 + 三个信号小节 + 一句解读。
 
-## 使用方式
+## Agent 触发流程（本 skill 的正式用法）
+
+用户提问命中「何时触发」后，按以下四步执行，**不要跳步、不要问用户参数**：
+
+### Step 1 · 决定扫描日期
+
+- 用户明说了日期（"20260730"、"上周五"）→ 换算为 `YYYYMMDD` 用作 `--date`
+- 用户没说 → 省略 `--date`，让 radar 自动取 `flow_df` 里最新可用日
+- 用户说"最近"、"这几天"→ 仍然按单日跑（本 skill 不做多日回补）
+
+### Step 2 · 调用（推荐一行）
 
 ```bash
-# 认证
-export PANDA_DATA_USERNAME=...
-export PANDA_DATA_PASSWORD=...
+cd /Users/since/Code/quantskills/skill-etf-flow-radar && \
+set -a && source ~/.zshrc >/dev/null 2>&1 && set +a && \
+/opt/miniconda3/envs/pandaai/bin/python scripts/radar.py [--date YYYYMMDD]
+```
 
-# 字段自检（首次使用 / panda_data 版本更新后跑一次）
-python -m scripts.data --self-check --date 20260721
+- 环境是 conda `pandaai`（Python 3.10，`panda_data` 已装）
+- 凭证 `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` 在 `~/.zshrc`（非交互 shell 须显式 source）
+- **不用再传 `--fetch_days`**：v0.2 起 `load_flow` / `load_daily` 已内部按月分段，跨月不再返回空
+- exit code：0 OK / 1 panda_data 异常 / 2 该日无 flow 数据 / 3 池空 / 4 字段自检失败
 
-# 单日扫描 —— 默认最近数据可用交易日
-python scripts/radar.py
+### Step 3 · 读取输出
 
-# 指定日期
-python scripts/radar.py --date 20260721
+产物固定在两个位置：
 
-# 调阈值
-python scripts/radar.py --date 20260721 \
+- `output/radar_YYYYMMDD.csv` —— 全量命中，字段见「输出结果」
+- `output/radar_YYYYMMDD.md` —— Top 10 + 三个信号分组
+
+**直接读 `.md`** 拿排行，需要数值细节（如 z、净申购绝对额）再看 `.csv`。
+
+### Step 4 · 用「样式② 结构化播报」呈现
+
+**不要**把 CSV 路径丢给用户，也**不要**贴 markdown 原文。按下列固定五段呈现：
+
+```
+今日 ETF 资金流扫描（YYYYMMDD，池 N 支）
+
+▎主线判断：<一句话，见下表>
+
+▎净申购最强 · 关注做多方向
+- <symbol>：z+X.XX，单日净申购 X.X 亿（为 20 日均值 X.X 倍）
+- <symbol>：z+X.XX，X.X 亿
+- <symbol>：z+X.XX（规模较小/较大，异动明显）
+
+▎净赎回最强 · 关注做空/避险方向
+- <symbol>：z-X.XX
+- <symbol>：z-X.XX
+- <symbol>：z-X.XX
+
+▎S4 折溢价背离：X 条 <如 0 且日期≥20260611，须加数据说明句>
+▎S7 连续 3 日同向：X 条 <若有，取 top3 附 ratio 与方向>
+```
+
+**主线判断话术表**：
+
+| 场景 | 话术 |
+|---|---|
+| S1 一边倒净申购（申购≥赎回×2） | 「资金整体做多，风险偏好抬升」 |
+| S1 一边倒净赎回（赎回≥申购×2） | 「资金整体撤离，避险情绪主导」 |
+| S1 双向命中相近 | 「资金流分歧，无一边倒共识」 |
+| S1 命中 ≤ 2 条 | 「今日资金流平淡，无显著异动」 |
+| 池空（exit 3） | 「今日无满足流动性门槛的 ETF 数据，可能是节假日/停市」 |
+
+**数据侧特殊情况**（Agent 必须显式说明，避免误报市场现象）：
+
+- **`discount_rate` 从 2026-06-11 起 panda_data 返回全空** → 用 20260611 及之后的日期跑时，S4 恒为 0。呈现时须写："S4 折溢价背离：0 条（panda_data 自 2026-06-11 起 `discount_rate` 全空，非市场信号缺失）"
+- **exit 1（panda_data 5xx）** → 不要重试超过一次，直接告诉用户"panda_data 服务暂不可用，稍后再试"
+- **exit 2（该日无 flow 数据）** → 提示用户"该日期无 ETF 一级申赎数据，可能是非交易日"
+
+**收尾一句**（可选）：如果用户看起来还会追问，加"如需看具体 ETF 细节、调阈值、或换日期，告诉我"。
+
+## 阈值调整（用户主动要求时才调）
+
+用户明确说"放宽/收紧阈值"或"我要看 z=1.5 的"时，透传对应 CLI 参数即可：
+
+```bash
+python scripts/radar.py --date YYYYMMDD \
     --z_threshold 1.5 --discount_threshold 0.002 \
     --consec_days 3 --ratio_threshold 2.0 \
-    --min_size 2e9 --min_amount 5e7 \
-    --lookback 20 --fetch_days 40
+    --min_size 2e9 --min_amount 5e7 --lookback 20
+```
+
+否则一律用默认阈值，不要主动"帮用户放宽"。
+
+## 开发者入口（不用于 Agent 触发路径）
+
+```bash
+# 字段自检（升级 panda_data 后手动跑一次）
+python -m scripts.data --self-check --date 20260730
 
 # 单元测试
 pytest tests/ -v
@@ -114,11 +189,14 @@ pytest tests/ -v
 - **字段自检通过**：`python -m scripts.data --self-check --date <近期日>` 返回 0
 - **端到端跑通**：至少一个真实日期能产出 CSV + MD，命中数**可为 0**（不为了凑数刻意放宽阈值）
 - **文档一致**：本文件的信号公式与 `scripts/signals/` 包中 `s1.py` / `s4.py` / `s7.py` 一致
+- **跨月不返回空**：`load_flow` / `load_daily` 内部按月分段，`test_load_daily_cross_month_splits_and_concats` 等 4 项测试覆盖
 
 ## 已知局限
 - `net_redemption` / `discount_rate` 正负号方向依赖首次实测校准；若反向，修改 `scripts/signals/{s1,s4,s7}.py` 中对应方向判断（v0.1.0 未抽出 `SIGN_FLIP` 常量，需要动手编辑三处比较；v0.2 计划补上）。
+- **`discount_rate` 自 2026-06-11 起 panda_data 返回全空**，S4 对之后日期恒 0 命中；这不是本 skill 的 bug，是上游数据缺失，Agent 呈现时须显式说明。
 - 不含"触限打满"作为独立信号，仅作参考列 `limit_hit_flag`。
 - 不接入 ETF 基础信息接口，`name` 列留空。
 - 不做批量日期回补；如需回补，外层 shell 循环即可。
 - 不含图表输出；v2 再加。
 - `get_fund_etf_cr_net` 的响应示例文本与表格字段对不上（示例贴的是股票股东减持数据）；设计一律以表格为准，首次实测校准。
+

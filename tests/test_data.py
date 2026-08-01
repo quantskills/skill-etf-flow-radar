@@ -66,3 +66,152 @@ def test_main_returns_1_on_missing_credentials(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Traceback" not in captured.err
     assert "PANDA_DATA_USERNAME" in captured.err
+
+
+# -----------------------------------------------------------------------------
+# Cross-month splitting — panda_data returns empty when the range spans months.
+# load_flow / load_daily hide this by chunking per calendar month.
+# -----------------------------------------------------------------------------
+
+
+def test_month_chunks_same_month_single_chunk():
+    assert data._month_chunks("20260610", "20260630") == [("20260610", "20260630")]
+    assert data._month_chunks("20260601", "20260601") == [("20260601", "20260601")]
+
+
+def test_month_chunks_spans_two_months():
+    assert data._month_chunks("20260501", "20260610") == [
+        ("20260501", "20260531"),
+        ("20260601", "20260610"),
+    ]
+
+
+def test_month_chunks_spans_year_boundary():
+    assert data._month_chunks("20261215", "20270115") == [
+        ("20261215", "20261231"),
+        ("20270101", "20270115"),
+    ]
+
+
+def test_month_chunks_reversed_returns_empty():
+    assert data._month_chunks("20260610", "20260601") == []
+
+
+def _make_daily_row(symbol: str, date: str, amount: float = 1e8) -> dict:
+    """One row shaped like panda_data.get_fund_daily."""
+    return {
+        "symbol": symbol,
+        "date": date,
+        "close": 1.0,
+        "amount": amount,
+        "discount_rate": 0.0,
+    }
+
+
+def test_load_daily_single_month_calls_once(monkeypatch):
+    """Back-compat: within a single month, panda_data is called exactly once."""
+    import pandas as pd
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_get_fund_daily(*, start_date, end_date):
+        calls.append((start_date, end_date))
+        return pd.DataFrame([_make_daily_row("510300.SH", "20260615")])
+
+    fake = types.ModuleType("panda_data")
+    fake.get_fund_daily = fake_get_fund_daily
+    monkeypatch.setitem(sys.modules, "panda_data", fake)
+
+    df = data.load_daily("20260610", "20260620")
+
+    assert calls == [("20260610", "20260620")]
+    assert list(df["symbol"]) == ["510300.SH"]
+
+
+def test_load_daily_cross_month_splits_and_concats(monkeypatch):
+    """The exact failure mode we hit: `20260501~20260610` returns empty from the real API.
+
+    Our wrapper must split into `20260501~20260531` and `20260601~20260610`, call each,
+    and concat. Simulate the real API here: return non-empty per-month, and also verify
+    that if the full-span call had been used it would be empty — so we know the wrapper
+    is what's giving us data.
+    """
+    import pandas as pd
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_get_fund_daily(*, start_date, end_date):
+        calls.append((start_date, end_date))
+        # If a caller ever passes the full cross-month span again, return empty
+        # (mirrors real panda_data behavior).
+        if start_date == "20260501" and end_date == "20260610":
+            return pd.DataFrame()
+        if start_date == "20260501" and end_date == "20260531":
+            return pd.DataFrame([_make_daily_row("510300.SH", "20260520")])
+        if start_date == "20260601" and end_date == "20260610":
+            return pd.DataFrame([_make_daily_row("510300.SH", "20260605")])
+        return pd.DataFrame()
+
+    fake = types.ModuleType("panda_data")
+    fake.get_fund_daily = fake_get_fund_daily
+    monkeypatch.setitem(sys.modules, "panda_data", fake)
+
+    df = data.load_daily("20260501", "20260610")
+
+    # Two per-month calls, no full-span call.
+    assert calls == [("20260501", "20260531"), ("20260601", "20260610")]
+    # Rows from both months present.
+    assert sorted(df["date"].tolist()) == ["20260520", "20260605"]
+
+
+def test_load_flow_cross_month_splits(monkeypatch):
+    """Same guarantee for load_flow (get_fund_etf_cr_net)."""
+    import pandas as pd
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_get_fund_etf_cr_net(*, start_date, end_date):
+        calls.append((start_date, end_date))
+        base = {
+            "symbol": "510300.SH", "date": start_date,
+            "net_redemption": 0.0, "shares": 0.0, "shares_change": 0.0,
+            "size": 3e9, "size_change": 0.0,
+        }
+        return pd.DataFrame([base])
+
+    fake = types.ModuleType("panda_data")
+    fake.get_fund_etf_cr_net = fake_get_fund_etf_cr_net
+    monkeypatch.setitem(sys.modules, "panda_data", fake)
+
+    df = data.load_flow("20260501", "20260610")
+
+    assert calls == [("20260501", "20260531"), ("20260601", "20260610")]
+    assert len(df) == 2
+
+
+def test_load_daily_dedupes_overlapping_boundary_rows(monkeypatch):
+    """Defensive: if a future API change starts returning boundary rows in both
+    adjacent chunks (e.g. month-end appears in both months), we dedupe on
+    (symbol, date) so the caller doesn't see duplicates."""
+    import pandas as pd
+
+    def fake_get_fund_daily(*, start_date, end_date):
+        # Both chunks pretend to include a 20260531 row for the same symbol.
+        if start_date == "20260501":
+            return pd.DataFrame([
+                _make_daily_row("510300.SH", "20260520"),
+                _make_daily_row("510300.SH", "20260531"),
+            ])
+        return pd.DataFrame([
+            _make_daily_row("510300.SH", "20260531"),
+            _make_daily_row("510300.SH", "20260605"),
+        ])
+
+    fake = types.ModuleType("panda_data")
+    fake.get_fund_daily = fake_get_fund_daily
+    monkeypatch.setitem(sys.modules, "panda_data", fake)
+
+    df = data.load_daily("20260501", "20260610")
+
+    # 20260531 appears only once.
+    assert sorted(df["date"].tolist()) == ["20260520", "20260531", "20260605"]
