@@ -24,8 +24,35 @@ tags: [quant, etf, flow, radar]
 | `get_fund_etf_cr_net` | 一级市场净申赎 | `symbol, date, net_redemption, shares, shares_change, size, size_change, net_inflow, unit_nav, close` |
 | `get_fund_etf_cr_limits` | 当日申赎限额 | `symbol, date, net_purchase_limit, net_redemption_limit, purchase_limit, redemption_limit` |
 | `get_fund_daily` | 二级市场行情 + 折溢价 | `symbol, date, close, amount, discount_rate, limit_up, limit_down, shares` |
+| `get_fund_detail`（可选） | 基金名称 / QDII 候选标注 | `symbol, name, is_qdii_fund` |
 
 字段详见 `references/need_used_api.md`。
+
+## 跨境 ETF 与 T+0/T+1 口径（重要）
+
+本 skill 现在会在 `get_fund_detail` 可用时，尝试为扫描池补充基金名称和
+`is_qdii_fund` 标记；该接口在部分 `panda_data` 版本中被标记为已废弃或未上线，
+因此它是**非阻塞的可选增强**。接口不可用时，资金流扫描仍继续，但报告会明确写出
+“未完成逐只 QDII/跨境标注”。
+
+这里必须区分两种口径：
+
+- **二级市场买卖**：交易所对跨境 ETF 的一般说明是，T 日买入的份额通常可在 T 日卖出，
+  即通常所说的跨境 ETF **T+0 回转交易**。
+- **对照口径**：国内普通股票 ETF 的二级市场买入份额通常按 **T+1** 可卖出；
+  跨境 ETF 的 T+0/T+1 不能只看代码或名称，仍应以具体产品适用的交易结算规则为准。
+- **一级市场申购/赎回**：份额确认、可卖出/可赎回时间、现金替代和赎回资金到账，
+  可能分别落在 T、T+1、T+2 甚至更晚，不能由“跨境 ETF”四个字或本雷达的
+  `net_redemption` 单独推导。
+
+因此，本 skill 的三条信号只回答“资金流发生了什么”，**不回答某一只 ETF 当前是否
+可以 T+0 卖出、何时可以赎回或何时到账**。播报中出现“跨境 ETF T+0”时，必须限定为
+“二级市场买卖的一般口径”，并提示具体产品以基金公告、交易所和券商规则为准。
+
+参考：
+[`上交所·跨境ETF`](https://etf.sse.com.cn/fund/learning/knowledge/c/5704994.shtml)、
+[`上交所·常见问题`](https://etf.sse.com.cn/fund/quertion/)、
+[`深交所·跨境ETF和LOF“T+0”回转交易问答`](https://investor.szse.cn/knowledge/fund/other/t20150128_538862.html)。
 
 ## 术语约定
 
@@ -82,7 +109,7 @@ S1/S7 需要 20 交易日历史；20 交易日 ≈ 28 自然日；取 40 自然�
 |---|---|
 | `trade_date` | 扫描日 T |
 | `symbol` | ETF 代码 |
-| `name` | 留空（本 MVP 不接入基金基础信息接口） |
+| `name` | 基金详情接口可用时填充；不可用时留空 |
 | `signal_type` | `S1` / `S4` / `S7` |
 | `signal_value` | S1: z；S4: |dr|；S7: 倍数 |
 | `abs_signal_value` | 分组内排序键 |
@@ -235,8 +262,7 @@ pytest tests/ -v
 ## 已知局限
 - `net_redemption` / `discount_rate` 正负号方向依赖首次实测校准；若反向，修改 `scripts/signals/{s1,s4,s7}.py` 中对应方向判断（v0.1.0 未抽出 `SIGN_FLIP` 常量，需要动手编辑三处比较；v0.2 计划补上）。
 - 不含"触限打满"作为独立信号，仅作参考列 `limit_hit_flag`。
-- 不接入 ETF 基础信息接口，`name` 列留空。
+- `get_fund_detail` 是可选增强且可能不可用；不可用时 `name` 留空，并在报告中明确未完成逐只 QDII/跨境标注。
 - 不做批量日期回补；如需回补，外层 shell 循环即可。
 - 不含图表输出；v2 再加。
 - `get_fund_etf_cr_net` 的响应示例文本与表格字段对不上（示例贴的是股票股东减持数据）；设计一律以表格为准，首次实测校准。
-

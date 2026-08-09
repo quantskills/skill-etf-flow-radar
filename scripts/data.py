@@ -1,8 +1,13 @@
 """panda_data thin wrappers for skill-etf-flow-radar.
 
-Three interfaces are used (see references/need_used_api.md). Column names are validated
+Three core interfaces are used (see references/need_used_api.md). Column names are validated
 against a required-superset set (EXPECTED_COLUMNS) on every load; mismatch triggers
 exit code 4 via self_check().
+
+Fund metadata is an optional enrichment: get_fund_detail is used on the selected universe
+to identify QDII/cross-border candidates and fill names. Its failure never blocks the radar,
+because the endpoint is marked deprecated/unlaunched by panda_data and is not required for
+the three signals.
 
 panda_data is a private package imported lazily inside each function so that this module
 can be imported (and its EXPECTED_COLUMNS inspected) without panda_data installed —
@@ -165,6 +170,38 @@ def load_limits(date: str) -> pd.DataFrame:
     df["date"] = df["date"].astype(str)
     df["symbol"] = df["symbol"].astype(str)
     return df
+
+
+def load_fund_meta(symbols: list[str]) -> pd.DataFrame:
+    """Load optional fund metadata for the selected universe.
+
+    The endpoint is deliberately kept out of EXPECTED_COLUMNS/self_check: it is an
+    enrichment only, and panda_data currently marks get_fund_detail as deprecated or
+    not universally available. Callers should catch failures and continue without it.
+
+    Returns a stable, small schema even if the service omits optional fields.
+    """
+    columns = ["symbol", "name", "is_qdii_fund"]
+    if not symbols:
+        return pd.DataFrame(columns=columns)
+
+    import panda_data
+
+    df = panda_data.get_fund_detail(
+        symbol=list(symbols),
+        fields=columns,
+    )
+    if df is None or (hasattr(df, "empty") and df.empty):
+        return pd.DataFrame(columns=columns)
+    if "symbol" not in df.columns:
+        raise ValueError("panda_data fund detail response missing column: symbol")
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            out[col] = None
+    out = out[columns].drop_duplicates(subset=["symbol"], keep="first")
+    out["symbol"] = out["symbol"].astype(str)
+    return out.reset_index(drop=True)
 
 
 def self_check(date: str) -> int:

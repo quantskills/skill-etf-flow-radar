@@ -43,7 +43,52 @@ def _fmt_row_md(row: pd.Series) -> str:
     return f"- **{sym}** — {st}: {sv}"
 
 
-def write_markdown(hits_df: pd.DataFrame, path: str, *, date: str, params: dict) -> None:
+def _write_cross_border_note(lines: list[str], fund_meta: pd.DataFrame | None) -> None:
+    """Explain the cross-border/T+0 boundary without turning it into a signal."""
+    lines.append("\n## 跨境 ETF 与 T+0/T+1 口径\n")
+    lines.append(
+        "- 本雷达可在基金详情接口可用时识别 QDII/跨境候选；该标签只用于说明，不参与三条信号判定。"
+    )
+    lines.append(
+        "- 口径对照：国内普通股票 ETF 二级市场通常按 T+1 可卖出；跨境 ETF 的 T+0 仅指二级市场买入后当日卖出的一般交易口径。"
+    )
+    lines.append(
+        "- 申购/赎回的份额确认、可卖出/可赎回时间和资金到账日另行计算，不能从上述 T+0/T+1 买卖口径直接推断。"
+    )
+    lines.append(
+        "- 本报告不根据日线数据推断具体产品的 T+0/T+1，也不把申购/赎回命中解释成可当日交易；具体以基金公告、交易所和券商规则为准。"
+    )
+    if fund_meta is None or fund_meta.empty:
+        lines.append(
+            "- 本次未取得基金详情，因此没有完成逐只 QDII/跨境标注；这不影响资金流信号，但不能据此判断 T+0/T+1。"
+        )
+        return
+    qdii = fund_meta[fund_meta["is_qdii_fund"].map(_is_qdii)]
+    if qdii.empty:
+        lines.append("- 本次扫描池未识别到 QDII/跨境候选，或基金详情未返回该字段。")
+    else:
+        names = qdii["name"].fillna("").astype(str)
+        labels = [f"{r.symbol}（{rname}）" if rname else str(r.symbol)
+                  for r, rname in zip(qdii.itertuples(index=False), names)]
+        lines.append(
+            f"- 本次扫描池识别到 {len(qdii)} 支 QDII/跨境候选：" + "、".join(labels[:10])
+            + ("等。" if len(labels) > 10 else "。")
+        )
+
+
+def _is_qdii(value: object) -> bool:
+    """Normalize the API's observed 0/1 and string boolean representations."""
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def write_markdown(
+    hits_df: pd.DataFrame,
+    path: str,
+    *,
+    date: str,
+    params: dict,
+    fund_meta: pd.DataFrame | None = None,
+) -> None:
     hits = _order(hits_df)
     lines: list[str] = []
     lines.append(f"# ETF 净申赎资金流雷达 · {date}\n")
@@ -85,6 +130,8 @@ def write_markdown(hits_df: pd.DataFrame, path: str, *, date: str, params: dict)
             f"S4 {(hits['signal_type']=='S4').sum()} 条，"
             f"S7 {(hits['signal_type']=='S7').sum()} 条。_\n"
         )
+
+    _write_cross_border_note(lines, fund_meta)
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text("\n".join(lines), encoding="utf-8")

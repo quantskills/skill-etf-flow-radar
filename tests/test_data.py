@@ -215,3 +215,41 @@ def test_load_daily_dedupes_overlapping_boundary_rows(monkeypatch):
 
     # 20260531 appears only once.
     assert sorted(df["date"].tolist()) == ["20260520", "20260531", "20260605"]
+
+
+def test_load_fund_meta_is_optional_enrichment(monkeypatch):
+    import pandas as pd
+
+    calls = []
+
+    def fake_get_fund_detail(*, symbol, fields):
+        calls.append((symbol, fields))
+        return pd.DataFrame([
+            {"symbol": "513050.SH", "name": "中概互联", "is_qdii_fund": 1},
+            {"symbol": "510300.SH", "name": "沪深300", "is_qdii_fund": 0},
+        ])
+
+    fake = types.ModuleType("panda_data")
+    fake.get_fund_detail = fake_get_fund_detail
+    monkeypatch.setitem(sys.modules, "panda_data", fake)
+
+    df = data.load_fund_meta(["513050.SH", "510300.SH"])
+
+    assert calls == [
+        (["513050.SH", "510300.SH"], ["symbol", "name", "is_qdii_fund"])
+    ]
+    assert list(df.columns) == ["symbol", "name", "is_qdii_fund"]
+    assert df.loc[df["symbol"] == "513050.SH", "is_qdii_fund"].iloc[0] == 1
+
+
+def test_load_fund_meta_empty_symbols_does_not_call_api(monkeypatch):
+    import pandas as pd
+
+    fake = types.ModuleType("panda_data")
+    fake.get_fund_detail = lambda **kwargs: (_ for _ in ()).throw(AssertionError("called"))
+    monkeypatch.setitem(sys.modules, "panda_data", fake)
+
+    df = data.load_fund_meta([])
+
+    assert df.empty
+    assert list(df.columns) == ["symbol", "name", "is_qdii_fund"]

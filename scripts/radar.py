@@ -126,6 +126,16 @@ def main() -> int:
         return 3
     print(f"[info] universe: {len(uni)} ETFs on {scan_date}", file=sys.stderr)
 
+    # Optional metadata enrichment. This is intentionally non-blocking: the radar's
+    # signals only need market/flow data, while fund-detail availability varies by
+    # panda_data deployment.
+    try:
+        fund_meta = data_mod.load_fund_meta(uni)
+    except Exception as e:
+        print(f"[warn] load_fund_meta failed, proceeding without QDII labels: {e}",
+              file=sys.stderr)
+        fund_meta = pd.DataFrame(columns=["symbol", "name", "is_qdii_fund"])
+
     # Signals
     hits = pd.concat([
         signals.s1_net_flow_z(flow_df, uni, scan_date, args.z_threshold, args.lookback),
@@ -139,6 +149,11 @@ def main() -> int:
         hits = hits.drop(columns=["amount_T_avg20"]).merge(
             avg_df, on="symbol", how="left", validate="many_to_one"
         )
+        if not fund_meta.empty:
+            hits = hits.drop(columns=["name"]).merge(
+                fund_meta[["symbol", "name"]], on="symbol", how="left", validate="many_to_one"
+            )
+            hits["name"] = hits["name"].fillna("")
         flags = _limit_hit_flags(limits_df)
         hits["limit_hit_flag"] = hits["symbol"].map(lambda s: flags.get(s, False))
         hits = hits[signals.SIGNAL_COLUMNS]  # enforce column order
@@ -152,7 +167,7 @@ def main() -> int:
         "z_threshold", "discount_threshold", "consec_days", "ratio_threshold",
         "min_size", "min_amount",
     )}
-    report.write_markdown(hits, str(md_path), date=scan_date, params=params)
+    report.write_markdown(hits, str(md_path), date=scan_date, params=params, fund_meta=fund_meta)
     print(f"[ok] wrote {csv_path} ({len(hits)} hits)")
     print(f"[ok] wrote {md_path}")
     return 0
