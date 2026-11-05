@@ -1,0 +1,97 @@
+{
+  "sdk_version": "1.0.6",
+  "contract_repository": "quantskills/skill-pandadata-api",
+  "contract_commit": "3f573a4140e4d1d02c556d981fac347168c943bb",
+  "required_methods": [
+    "get_fund_daily",
+    "get_fund_detail",
+    "get_fund_etf_cr_limits",
+    "get_fund_etf_cr_net",
+    "init_token"
+  ],
+  "validation": {
+    "offline_contract": "passed",
+    "live_service": "not_tested"
+  },
+  "runtime_entrypoint": "SKILL.md",
+  "method_contracts": {
+    "get_fund_daily": {
+      "signature": "(start_date: 'str' = '', end_date: 'str' = '', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "parameters": [
+        "start_date",
+        "end_date",
+        "symbol",
+        "exchange",
+        "fields"
+      ],
+      "required": [],
+      "runtime_required": [
+        "end_date",
+        "start_date"
+      ],
+      "upstream_warning": true
+    },
+    "get_fund_detail": {
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, type: 'Optional[Union[str, List[str]]]' = None, operation_mode: 'Optional[Union[str, List[str]]]' = None, etf_lof_type: 'Optional[Union[str, List[str]]]' = None, is_class_fund: 'Optional[Union[int, List[int]]]' = None, index_fund_type: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[Union[str, List[str]]]' = None, fund_status: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "parameters": [
+        "symbol",
+        "exchange",
+        "type",
+        "operation_mode",
+        "etf_lof_type",
+        "is_class_fund",
+        "index_fund_type",
+        "status",
+        "fund_status",
+        "fields"
+      ],
+      "required": [],
+      "runtime_required": [],
+      "upstream_warning": true
+    },
+    "get_fund_etf_cr_limits": {
+      "signature": "(start_date: 'str' = '', end_date: 'str' = '', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "parameters": [
+        "start_date",
+        "end_date",
+        "symbol",
+        "exchange",
+        "fields"
+      ],
+      "required": [],
+      "runtime_required": [
+        "end_date",
+        "start_date"
+      ],
+      "upstream_warning": true
+    },
+    "get_fund_etf_cr_net": {
+      "signature": "(start_date: 'str' = '', end_date: 'str' = '', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "parameters": [
+        "start_date",
+        "end_date",
+        "symbol",
+        "exchange",
+        "fields"
+      ],
+      "required": [],
+      "runtime_required": [
+        "end_date",
+        "start_date"
+      ],
+      "upstream_warning": true
+    },
+    "init_token": {
+      "signature": "(username: 'Optional[str]' = '', password: 'Optional[str]' = '', base_url: 'Optional[str]' = 'https://pandadata.pandaaiquant.com', country: 'Optional[str]' = 'CN') -> 'str'",
+      "parameters": [
+        "username",
+        "password",
+        "base_url",
+        "country"
+      ],
+      "required": [],
+      "runtime_required": [],
+      "upstream_warning": false
+    }
+  }
+}

@@ -266,3 +266,7 @@ pytest tests/ -v
 - 不做批量日期回补；如需回补，外层 shell 循环即可。
 - 不含图表输出；v2 再加。
 - `get_fund_etf_cr_net` 的响应示例文本与表格字段对不上（示例贴的是股票股东减持数据）；设计一律以表格为准，首次实测校准。
+
+## Pandadata compatibility
+
+[Pandadata 1.0.6 compatibility](references/pandadata-compatibility.md) — exact SDK baseline, validation scope, and shared guidance for all supported agent runtimes.

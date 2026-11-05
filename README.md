@@ -23,3 +23,6 @@ Outputs land in `output/radar_YYYYMMDD.csv` + `.md`.
 国内普通股票 ETF 的二级市场买入份额通常按 T+1 可卖出；跨境 ETF 的 T+0 仅指二级市场买入后当日卖出的常见交易口径；申购/赎回的份额确认、
 可卖出/可赎回时间和资金到账日不由本 radar 推断，必须以具体基金公告、交易所和券商规则为准。
 详见 [SKILL.md](SKILL.md) 的“跨境 ETF 与 T+0/T+1 口径”章节。
+
+
+Pandadata 兼容维护：[abgyjaguo](https://github.com/abgyjaguo)，保留原项目作者署名。
